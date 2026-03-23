@@ -87,10 +87,10 @@ def is_allowed(update: Update) -> bool:
 
 
 def hub_tree() -> str:
-    """Дерево ~/hub/ (3 уровня глубины)."""
+    """Дерево ~/hub/ (4 уровня глубины)."""
     try:
         result = subprocess.run(
-            ["find", str(HUB_DIR), "-maxdepth", "3", "-not", "-path", "*/.*"],
+            ["find", str(HUB_DIR), "-maxdepth", "4", "-not", "-path", "*/.*"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -479,15 +479,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def init_hub():
-    """Создать базовую структуру ~/hub/ если отсутствует."""
-    for d in ["projects", "tasks", "notes", "inbox"]:
+    """Создать базовую структуру hub/ если отсутствует."""
+    dirs = [
+        "projects",
+        "areas/health", "areas/finances", "areas/learning",
+        "areas/buddhism", "areas/team", "areas/home",
+        "notes",
+        "tasks",
+        "inbox",
+    ]
+    for d in dirs:
         (HUB_DIR / d).mkdir(parents=True, exist_ok=True)
 
-    # Начальные файлы
     defaults = {
-        "tasks/tasks.md": "# Задачи\n",
-        "notes/ideas.md": "# Идеи\n",
-        "notes/log.md": "# Лог\n",
+        "tasks/tasks.md": "# Tasks\n",
+        "notes/_index.md": "# Notes Index\n",
+        "inbox/index.md": "# Inbox\n",
     }
     for rel_path, content in defaults.items():
         full = HUB_DIR / rel_path
