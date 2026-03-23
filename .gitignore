@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+com.adhd-hub.plist
+adhd-hub-prompt.md
