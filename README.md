@@ -61,7 +61,7 @@ hub/
     └── index.md
 ```
 
-Routing rules are fully customizable in [`CLAUDE.md`](CLAUDE.md).
+Routing rules are in [`prompts/router.md`](prompts/router.md), search prompt in [`prompts/search.md`](prompts/search.md).
 
 ## Prerequisites
 
@@ -200,13 +200,21 @@ launchctl unload ~/Library/LaunchAgents/com.adhd-hub.plist
 | Command | Description |
 |---|---|
 | `/start` | Welcome message |
-| `/status` | Queue status + hub file tree |
+| `/status` | Queue status + current mode + hub file tree |
+| `/search` | Switch to search mode — ask questions about your hub files |
+| `/capture` | Switch back to capture mode (default) — route thoughts to files |
 
-Everything else you send (text, voice, files, photos) gets processed through the AI router.
+Everything else you send (text, voice, files, photos) gets processed based on the current mode:
+- **Capture** (default) — AI classifies and routes to hub files
+- **Search** — AI searches hub files and returns answers
 
-## Customizing routing rules
+## Customizing prompts
 
-Edit [`CLAUDE.md`](CLAUDE.md) to change how Claude classifies and routes your thoughts. The file is loaded on every request, so changes take effect immediately.
+Prompts live in the `prompts/` folder:
+- [`prompts/router.md`](prompts/router.md) — how Claude classifies and routes your thoughts
+- [`prompts/search.md`](prompts/search.md) — how Claude searches and answers questions
+
+Files are loaded on every request, so changes take effect immediately.
 
 ## Tech stack
 

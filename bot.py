@@ -28,13 +28,23 @@ HUB_DIR = Path(os.environ.get("HUB_DIR", Path(__file__).parent / "hub"))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 
 # Инструменты, разрешённые Claude CLI
-ALLOWED_TOOLS = ",".join([
+CAPTURE_TOOLS = ",".join([
     "Read", "Write", "Edit",
     "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)",
     "Bash(mv:*)", "Bash(cp:*)", "Bash(find:*)",
     "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)",
     "Bash(wc:*)", "Bash(date:*)",
 ])
+
+# Поиск — только чтение, без записи
+SEARCH_TOOLS = ",".join([
+    "Read",
+    "Bash(ls:*)", "Bash(cat:*)", "Bash(find:*)",
+    "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)",
+    "Bash(wc:*)",
+])
+
+PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 # Расширения аудиофайлов для транскрипции
 AUDIO_EXTENSIONS = {
@@ -58,6 +68,9 @@ log = logging.getLogger("adhd-hub")
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 queue: asyncio.Queue = asyncio.Queue()
+
+# Режим пользователя: "capture" (дефолт) или "search"
+user_mode: dict[int, str] = {}
 
 # Паттерн для очистки ANSI escape-кодов
 ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -98,9 +111,9 @@ def hub_tree() -> str:
         return "(не удалось прочитать)"
 
 
-def load_rules() -> str:
-    """Загрузить правила роутинга из CLAUDE.md."""
-    path = Path(__file__).parent / "CLAUDE.md"
+def load_prompt(name: str) -> str:
+    """Загрузить промпт из prompts/{name}.md."""
+    path = PROMPTS_DIR / f"{name}.md"
     return path.read_text() if path.exists() else ""
 
 
@@ -155,32 +168,15 @@ async def transcribe(file_path: str) -> str:
 # --- Claude CLI ---
 
 
-async def route_with_claude(content: str) -> str:
-    """Отправить контент Claude для роутинга и получить отчёт."""
-    rules = load_rules()
-    tree = hub_tree()
-
-    prompt = f"""# Правила роутинга
-{rules}
-
-# Текущая структура ~/hub/
-{tree}
-
-# Входящее сообщение
-{content}
-
-Обработай входящее сообщение по правилам роутинга. Верни краткий отчёт (3-5 строк):
-- ✅ Что сделано
-- 📁 Куда сохранено/мигрировано
-- 🔔 Рекомендации (если есть)"""
-
+async def run_claude(prompt: str, allowed_tools: str) -> str:
+    """Запустить Claude CLI с промптом и вернуть результат."""
     cmd = [
         "claude",
         "-p",
         "--model",
         CLAUDE_MODEL,
         "--allowedTools",
-        ALLOWED_TOOLS,
+        allowed_tools,
     ]
 
     proc = await asyncio.create_subprocess_exec(
@@ -201,17 +197,60 @@ async def route_with_claude(content: str) -> str:
     return result or "⚠️ Claude вернул пустой ответ"
 
 
+async def route_with_claude(content: str) -> str:
+    """Отправить контент Claude для роутинга и получить отчёт."""
+    rules = load_prompt("router")
+    tree = hub_tree()
+
+    prompt = f"""# Правила роутинга
+{rules}
+
+# Текущая структура ~/hub/
+{tree}
+
+# Входящее сообщение
+{content}
+
+Обработай входящее сообщение по правилам роутинга. Верни краткий отчёт (3-5 строк):
+- ✅ Что сделано
+- 📁 Куда сохранено/мигрировано
+- 🔔 Рекомендации (если есть)"""
+
+    return await run_claude(prompt, CAPTURE_TOOLS)
+
+
+async def search_with_claude(query: str) -> str:
+    """Поиск по файлам hub/ через Claude."""
+    rules = load_prompt("search")
+    tree = hub_tree()
+
+    prompt = f"""# Правила поиска
+{rules}
+
+# Текущая структура ~/hub/
+{tree}
+
+# Запрос
+{query}"""
+
+    return await run_claude(prompt, SEARCH_TOOLS)
+
+
 # --- Воркер очереди ---
 
 
 async def queue_worker():
     """Последовательная обработка задач из очереди."""
     while True:
-        chat_id, message_id, context, content = await queue.get()
+        chat_id, message_id, context, content, user_id = await queue.get()
         bot = context.bot
+        mode = user_mode.get(user_id, "capture")
         try:
             await react(bot, chat_id, message_id, "🤔")
-            report = await route_with_claude(content)
+            if mode == "search":
+                report = await search_with_claude(content)
+            else:
+                report = await route_with_claude(content)
             await react(bot, chat_id, message_id, "⚡")
             # Telegram лимит — 4096 символов на сообщение
             for i in range(0, len(report), 4000):
@@ -238,8 +277,9 @@ async def enqueue(
 ):
     """Добавить задачу в очередь."""
     msg = update.message
+    user_id = update.effective_user.id
     await react(context.bot, msg.chat_id, msg.message_id, "👀")
-    await queue.put((msg.chat_id, msg.message_id, context, content))
+    await queue.put((msg.chat_id, msg.message_id, context, content, user_id))
 
 
 # --- Обработчики сообщений ---
@@ -263,8 +303,27 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     tree = hub_tree()
     qsize = queue.qsize()
+    mode = user_mode.get(update.effective_user.id, "capture")
     status = f"📊 В очереди: {qsize}" if qsize else "📊 Очередь пуста"
-    await update.message.reply_text(f"{status}\n\n📂 ~/hub/\n{tree}")
+    await update.message.reply_text(
+        f"{status}\n🔀 Режим: {mode}\n\n📂 ~/hub/\n{tree}"
+    )
+
+
+async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Переключить в режим поиска."""
+    if not is_allowed(update):
+        return
+    user_mode[update.effective_user.id] = "search"
+    await update.message.reply_text("🔍 Режим поиска. Задавай вопросы по hub/.\n/capture — вернуться к захвату.")
+
+
+async def cmd_capture(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Переключить в режим захвата."""
+    if not is_allowed(update):
+        return
+    user_mode[update.effective_user.id] = "capture"
+    await update.message.reply_text("📥 Режим захвата. Кидай мысли — разложу по папкам.\n/search — переключить на поиск.")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -441,6 +500,8 @@ def main():
     # Команды
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("search", cmd_search))
+    app.add_handler(CommandHandler("capture", cmd_capture))
 
     # Контент — порядок важен
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
