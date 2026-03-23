@@ -43,10 +43,10 @@ You ──→ Telegram ──→ Bot ──→ [Voice?] ──→ Groq Whisper �
 
 ## File structure
 
-Claude organizes your thoughts into:
+Claude organizes your thoughts into `./hub/` (or custom path via `HUB_DIR`):
 
 ```
-~/hub/
+hub/
 ├── projects/          # Project folders (created freely by Claude)
 │   └── {name}/
 │       ├── README.md
@@ -142,7 +142,7 @@ GROQ_API_KEY=your-groq-api-key
 ALLOWED_USER_ID=your-telegram-user-id
 
 # Optional
-HUB_DIR=~/hub           # Where to store files (default: ~/hub)
+HUB_DIR=/custom/path    # Where to store files (default: ./hub in project dir)
 CLAUDE_MODEL=opus        # Claude model alias (default: opus)
 ```
 

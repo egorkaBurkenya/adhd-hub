@@ -2,5 +2,6 @@
 .venv/
 __pycache__/
 *.pyc
+hub/
 com.adhd-hub.plist
 adhd-hub-prompt.md

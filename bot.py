@@ -24,7 +24,7 @@ from telegram.ext import (
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 ALLOWED_USER_ID = int(os.environ["ALLOWED_USER_ID"])
-HUB_DIR = Path(os.environ.get("HUB_DIR", Path.home() / "hub"))
+HUB_DIR = Path(os.environ.get("HUB_DIR", Path(__file__).parent / "hub"))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
 
 # Инструменты, разрешённые Claude CLI
