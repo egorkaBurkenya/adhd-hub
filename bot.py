@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from groq import Groq
-from telegram import ReactionTypeEmoji, Update
+from telegram import BotCommand, ReactionTypeEmoji, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -483,6 +483,12 @@ def init_hub():
 async def post_init(app: Application):
     """Запуск при старте бота."""
     init_hub()
+    await app.bot.set_my_commands([
+        BotCommand("start", "Приветствие"),
+        BotCommand("status", "Очередь, режим, структура hub"),
+        BotCommand("search", "Режим поиска по hub"),
+        BotCommand("capture", "Режим захвата мыслей"),
+    ])
     task = asyncio.create_task(queue_worker(), name="queue_worker")
     task.add_done_callback(
         lambda t: log.error("Воркер упал: %s", t.exception())
