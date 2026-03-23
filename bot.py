@@ -26,6 +26,8 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 ALLOWED_USER_ID = int(os.environ["ALLOWED_USER_ID"])
 HUB_DIR = Path(os.environ.get("HUB_DIR", Path(__file__).parent / "hub"))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "opus")
+USER_LANGUAGE = os.environ.get("USER_LANGUAGE", "")
+WHISPER_LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "ru")
 
 # Инструменты, разрешённые Claude CLI
 CAPTURE_TOOLS = ",".join([
@@ -117,6 +119,17 @@ def load_prompt(name: str) -> str:
     return path.read_text() if path.exists() else ""
 
 
+def language_instruction() -> str:
+    """Инструкция по языку документов (если USER_LANGUAGE задан)."""
+    if not USER_LANGUAGE:
+        return ""
+    return (
+        f"\n# Language\n"
+        f"Write all documents and responses in {USER_LANGUAGE}. "
+        f"If existing content in a document is in a different language, preserve it as-is.\n"
+    )
+
+
 def clean_output(text: str) -> str:
     """Убрать ANSI escape-коды из вывода Claude."""
     return ANSI_RE.sub("", text)
@@ -159,7 +172,7 @@ async def transcribe(file_path: str) -> str:
             return groq_client.audio.transcriptions.create(
                 file=(Path(file_path).name, f),
                 model="whisper-large-v3-turbo",
-                language="ru",
+                language=WHISPER_LANGUAGE,
             ).text
 
     return await asyncio.get_event_loop().run_in_executor(None, _call)
@@ -201,20 +214,21 @@ async def route_with_claude(content: str) -> str:
     """Отправить контент Claude для роутинга и получить отчёт."""
     rules = load_prompt("router")
     tree = hub_tree()
+    lang = language_instruction()
 
-    prompt = f"""# Правила роутинга
+    prompt = f"""# Routing rules
 {rules}
-
-# Текущая структура ~/hub/
+{lang}
+# Current hub/ structure
 {tree}
 
-# Входящее сообщение
+# Incoming message
 {content}
 
-Обработай входящее сообщение по правилам роутинга. Верни краткий отчёт (3-5 строк):
-- ✅ Что сделано
-- 📁 Куда сохранено/мигрировано
-- 🔔 Рекомендации (если есть)"""
+Process the incoming message according to routing rules. Return a short report (3-5 lines):
+- ✅ What was done
+- 📁 Where saved/moved
+- 🔔 Recommendations (if any)"""
 
     return await run_claude(prompt, CAPTURE_TOOLS)
 
@@ -223,14 +237,15 @@ async def search_with_claude(query: str) -> str:
     """Поиск по файлам hub/ через Claude."""
     rules = load_prompt("search")
     tree = hub_tree()
+    lang = language_instruction()
 
-    prompt = f"""# Правила поиска
+    prompt = f"""# Search rules
 {rules}
-
-# Текущая структура ~/hub/
+{lang}
+# Current hub/ structure
 {tree}
 
-# Запрос
+# Query
 {query}"""
 
     return await run_claude(prompt, SEARCH_TOOLS)
