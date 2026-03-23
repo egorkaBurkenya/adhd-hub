@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from groq import Groq
-from telegram import Update
+from telegram import ReactionTypeEmoji, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -123,6 +123,18 @@ def unique_path(directory: Path, filename: str) -> Path:
     return path
 
 
+async def react(bot, chat_id: int, message_id: int, emoji: str):
+    """Поставить реакцию на сообщение (статус обработки)."""
+    try:
+        await bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[ReactionTypeEmoji(emoji)],
+        )
+    except Exception:
+        log.debug("Не удалось поставить реакцию %s", emoji)
+
+
 # --- Транскрипция ---
 
 
@@ -195,17 +207,26 @@ async def route_with_claude(content: str) -> str:
 async def queue_worker():
     """Последовательная обработка задач из очереди."""
     while True:
-        chat_id, context, content = await queue.get()
+        chat_id, message_id, context, content = await queue.get()
+        bot = context.bot
         try:
-            await context.bot.send_message(chat_id, "⏳ Обрабатываю...")
+            await react(bot, chat_id, message_id, "🤔")
             report = await route_with_claude(content)
+            await react(bot, chat_id, message_id, "⚡")
             # Telegram лимит — 4096 символов на сообщение
             for i in range(0, len(report), 4000):
-                await context.bot.send_message(chat_id, report[i : i + 4000])
+                await bot.send_message(
+                    chat_id, report[i : i + 4000],
+                    reply_to_message_id=message_id,
+                )
         except Exception as e:
             log.exception("Ошибка обработки задачи")
+            await react(bot, chat_id, message_id, "💔")
             try:
-                await context.bot.send_message(chat_id, f"❌ Ошибка: {e}")
+                await bot.send_message(
+                    chat_id, f"❌ Ошибка: {e}",
+                    reply_to_message_id=message_id,
+                )
             except Exception:
                 pass
         finally:
@@ -215,14 +236,10 @@ async def queue_worker():
 async def enqueue(
     update: Update, context: ContextTypes.DEFAULT_TYPE, content: str
 ):
-    """Добавить задачу в очередь и уведомить о позиции."""
-    chat_id = update.effective_chat.id
-    await queue.put((chat_id, context, content))
-    qsize = queue.qsize()
-    if qsize > 1:
-        await update.message.reply_text(f"📥 Принято. В очереди: {qsize}")
-    else:
-        await update.message.reply_text("📥 Принято")
+    """Добавить задачу в очередь."""
+    msg = update.message
+    await react(context.bot, msg.chat_id, msg.message_id, "👀")
+    await queue.put((msg.chat_id, msg.message_id, context, content))
 
 
 # --- Обработчики сообщений ---
@@ -268,12 +285,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         tg_file = await context.bot.get_file(update.message.voice.file_id)
         await tg_file.download_to_drive(tmp_path)
-        await update.message.reply_text("🎙 Транскрибирую...")
         text = await transcribe(tmp_path)
         await enqueue(update, context, f"[Голосовое сообщение]\n{text}")
     except Exception as e:
         log.exception("Ошибка транскрипции голосового")
-        await update.message.reply_text(f"❌ Ошибка транскрипции: {e}")
+        msg = update.message
+        await react(context.bot, msg.chat_id, msg.message_id, "💔")
+        await msg.reply_text(f"❌ Ошибка транскрипции: {e}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -292,12 +310,13 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         tg_file = await context.bot.get_file(audio.file_id)
         await tg_file.download_to_drive(tmp_path)
-        await update.message.reply_text("🎙 Транскрибирую...")
         text = await transcribe(tmp_path)
         await enqueue(update, context, f"[Аудиофайл: {audio.file_name}]\n{text}")
     except Exception as e:
         log.exception("Ошибка транскрипции аудио")
-        await update.message.reply_text(f"❌ Ошибка транскрипции: {e}")
+        msg = update.message
+        await react(context.bot, msg.chat_id, msg.message_id, "💔")
+        await msg.reply_text(f"❌ Ошибка транскрипции: {e}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -324,14 +343,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             tg_file = await context.bot.get_file(doc.file_id)
             await tg_file.download_to_drive(tmp_path)
-            await update.message.reply_text("🎙 Транскрибирую...")
             text = await transcribe(tmp_path)
             await enqueue(
                 update, context, f"[Аудиофайл: {filename}]\n{text}"
             )
         except Exception as e:
             log.exception("Ошибка транскрипции документа-аудио")
-            await update.message.reply_text(f"❌ Ошибка транскрипции: {e}")
+            msg = update.message
+            await react(context.bot, msg.chat_id, msg.message_id, "💔")
+            await msg.reply_text(f"❌ Ошибка транскрипции: {e}")
         finally:
             Path(tmp_path).unlink(missing_ok=True)
         return
